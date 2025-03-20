@@ -1,7 +1,7 @@
 import { alphaNumericAndMarksRe, digitRe } from '../regex-lib';
 import { UrlMatch, UrlMatchType } from '../match/url-match';
 import { Match } from '../match/match';
-import { remove, assertNever } from '../utils';
+import { removeStateMachine, assertNever } from '../utils';
 import {
     httpSchemeRe,
     isDomainLabelChar,
@@ -10,26 +10,26 @@ import {
     isSchemeChar,
     isSchemeStartChar,
     isUrlSuffixStartChar,
-    isValidIpV4Address,
-    isValidSchemeUrl,
-    isValidTldMatch,
+    isValidIpV4AddressWithCache,
+    isValidSchemeUrlWithCache,
+    isValidTldMatchWithCache,
     urlSuffixedCharsNotAllowedAtEndRe,
 } from './uri-utils';
 import {
     isEmailLocalPartChar,
     isEmailLocalPartStartChar,
-    isValidEmail,
+    isValidEmailWithCache,
     mailtoSchemePrefixRe,
 } from './email-utils';
 import { EmailMatch } from '../match/email-match';
-import { HashtagService, isHashtagTextChar, isValidHashtag } from './hashtag-utils';
+import { HashtagService, isHashtagTextChar, isValidHashtagWithCache } from './hashtag-utils';
 import { HashtagMatch } from '../match/hashtag-match';
-import { isMentionTextChar, isValidMention, MentionService } from './mention-utils';
+import { isMentionTextChar, isValidMentionWithCache, MentionService } from './mention-utils';
 import { MentionMatch } from '../match/mention-match';
 import {
     isPhoneNumberSeparatorChar,
     isPhoneNumberControlChar,
-    isValidPhoneNumber,
+    isValidPhoneNumberWithCache,
 } from './phone-number-utils';
 import { PhoneMatch } from '../match/phone-match';
 import { AnchorTagBuilder } from '../anchor-tag-builder';
@@ -62,16 +62,26 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
     //     head: ['charIdx', 'char', 'code', 'type', 'states', 'charIdx', 'startIdx', 'reached accept state'],
     // });
 
+    // Maximum number of concurrent state machines to prevent performance degradation
+    const MAX_CONCURRENT_STATE_MACHINES = 15;
+
     let charIdx = 0;
     for (; charIdx < textLen; charIdx++) {
         const char = text.charAt(charIdx);
 
         if (stateMachines.length === 0) {
             stateNoMatch(char);
+        } else if (stateMachines.length > MAX_CONCURRENT_STATE_MACHINES) {
+            // Keep only the most promising state machines when we exceed the limit
+            stateMachines.sort(
+                (a, b) => Number(b.acceptStateReached) - Number(a.acceptStateReached)
+            );
+            stateMachines.length = MAX_CONCURRENT_STATE_MACHINES;
         } else {
             // Must loop through the state machines backwards for when one
             // is removed
-            for (let stateIdx = stateMachines.length - 1; stateIdx >= 0; stateIdx--) {
+            const machinesLength = stateMachines.length;
+            for (let stateIdx = machinesLength - 1; stateIdx >= 0; stateIdx--) {
                 const stateMachine = stateMachines[stateIdx];
 
                 switch (stateMachine.state) {
@@ -282,8 +292,12 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachines.push(createPhoneNumberStateMachine(charIdx, State.PhoneNumberOpenParen));
         } else {
             if (digitRe.test(char)) {
-                // A digit could start a phone number
-                stateMachines.push(createPhoneNumberStateMachine(charIdx, State.PhoneNumberDigit));
+                // A digit could start a phone number - check if it looks promising
+                if (charIdx === 0 || /\s/.test(text.charAt(charIdx - 1))) {
+                    stateMachines.push(
+                        createPhoneNumberStateMachine(charIdx, State.PhoneNumberDigit)
+                    );
+                }
 
                 // A digit could start an IP address
                 stateMachines.push(createIpV4UrlStateMachine(charIdx, State.IpV4Digit));
@@ -323,7 +337,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             // Stay in SchemeChar state
         } else {
             // Any other character, not a scheme
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -336,13 +350,13 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         } else if (char === '/') {
             // Not a valid scheme match, but may be the start of a
             // protocol-relative match (such as //google.com)
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
             stateMachines.push(createTldUrlStateMachine(charIdx, State.ProtocolRelativeSlash1));
         } else if (isSchemeChar(char)) {
             stateMachine.state = State.SchemeChar;
         } else {
             // Any other character, not a scheme
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -351,7 +365,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.SchemeSlash1;
         } else if (char === '.') {
             // We've read something like 'hello:.' - don't capture
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else if (isDomainLabelStartChar(char)) {
             stateMachine.state = State.DomainLabelChar;
 
@@ -364,7 +378,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
                 stateMachines.push(createSchemeUrlStateMachine(charIdx, State.SchemeChar));
             }
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -391,7 +405,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.acceptStateReached = true;
         } else {
             // not valid
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -402,7 +416,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         } else {
             // Anything else, cannot be the start of a protocol-relative
             // URL.
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -412,7 +426,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.DomainLabelChar;
         } else {
             // Anything else, not a URL
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -478,7 +492,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         } else if (alphaNumericAndMarksRe.test(char)) {
             // If we hit an alpha character, must not be an IPv4
             // Example of this: 1.2.3.4abc
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else {
             captureMatchIfValidAndRemove(stateMachine);
         }
@@ -582,7 +596,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (isEmailLocalPartChar(char)) {
             stateMachine.state = State.EmailLocalPart;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -601,7 +615,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.EmailLocalPart;
         } else {
             // not an email address character
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -610,16 +624,16 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (char === '.') {
             // We read a second '.' in a row, not a valid email address
             // local part
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else if (char === '@') {
             // We read the '@' character immediately after a dot ('.'), not
             // an email address
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else if (isEmailLocalPartChar(char)) {
             stateMachine.state = State.EmailLocalPart;
         } else {
             // Anything else, not an email address
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -628,7 +642,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.EmailDomainChar;
         } else {
             // Anything else, not an email address
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -683,7 +697,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.HashtagTextChar;
             stateMachine.acceptStateReached = true;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -703,7 +717,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             stateMachine.state = State.MentionTextChar;
             stateMachine.acceptStateReached = true;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -715,7 +729,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             // Char is invalid for a mention text char, not a valid match.
             // Note that ascii alphanumeric chars are okay (which are tested
             // in the previous 'if' statement, but others are not)
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else {
             captureMatchIfValidAndRemove(stateMachine);
         }
@@ -725,7 +739,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (digitRe.test(char)) {
             stateMachine.state = State.PhoneNumberDigit;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
 
             // This character may start a new match. Add states for it
             stateNoMatch(char);
@@ -736,7 +750,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (digitRe.test(char)) {
             stateMachine.state = State.PhoneNumberAreaCodeDigit1;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
 
         // It's also possible that the paren was just an open brace for
@@ -748,7 +762,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (digitRe.test(char)) {
             stateMachine.state = State.PhoneNumberAreaCodeDigit2;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -756,7 +770,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (digitRe.test(char)) {
             stateMachine.state = State.PhoneNumberAreaCodeDigit3;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -764,7 +778,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         if (char === ')') {
             stateMachine.state = State.PhoneNumberCloseParen;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -774,7 +788,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         } else if (isPhoneNumberSeparatorChar(char)) {
             stateMachine.state = State.PhoneNumberSeparator;
         } else {
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         }
     }
 
@@ -841,7 +855,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         } else if (digitRe.test(char)) {
             // According to some of the older tests, if there's a digit
             // after a '#' sign, the match is invalid. TODO: Revisit if this is true
-            remove(stateMachines, stateMachine);
+            removeStateMachine(stateMachines, stateMachine);
         } else {
             captureMatchIfValidAndRemove(stateMachine);
         }
@@ -856,7 +870,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         // Remove the state machine first. There are a number of code paths
         // which return out of this function early, so make sure we have
         // this done
-        remove(stateMachines, stateMachine);
+        removeStateMachine(stateMachines, stateMachine);
 
         // Make sure the state machine being checked has actually reached an
         // "accept" state. If it hasn't reach one, it can't be a match
@@ -865,7 +879,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
         }
 
         let startIdx = stateMachine.startIdx;
-        let matchedText = text.slice(stateMachine.startIdx, charIdx);
+        let matchedText = text.substring(startIdx, charIdx);
 
         // Handle any unbalanced braces (parens, square brackets, or curly
         // brackets) inside the URL. This handles situations like:
@@ -905,18 +919,18 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
                     // of where the match should start and shift the match to
                     // start from the beginning of the common scheme
                     startIdx = startIdx + httpSchemeMatch.index;
-                    matchedText = matchedText.slice(httpSchemeMatch.index);
+                    matchedText = matchedText.substring(httpSchemeMatch.index);
                 }
 
-                if (!isValidSchemeUrl(matchedText)) {
+                if (!isValidSchemeUrlWithCache(matchedText)) {
                     return; // not a valid match
                 }
             } else if (urlMatchType === 'tld') {
-                if (!isValidTldMatch(matchedText)) {
+                if (!isValidTldMatchWithCache(matchedText)) {
                     return; // not a valid match
                 }
             } else if (urlMatchType === 'ipV4') {
-                if (!isValidIpV4Address(matchedText)) {
+                if (!isValidIpV4AddressWithCache(matchedText)) {
                     return; // not a valid match
                 }
             } else {
@@ -930,7 +944,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
                     offset: startIdx,
                     urlMatchType: urlMatchType,
                     url: matchedText,
-                    protocolRelativeMatch: matchedText.slice(0, 2) === '//',
+                    protocolRelativeMatch: matchedText.substring(0, 2) === '//',
 
                     // TODO: Do these settings need to be passed to the match,
                     // or should we handle them here in UrlMatcher?
@@ -941,7 +955,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             );
         } else if (stateMachine.type === 'email') {
             // if the email address has a valid TLD, add it to the list of matches
-            if (isValidEmail(matchedText)) {
+            if (isValidEmailWithCache(matchedText)) {
                 matches.push(
                     new EmailMatch({
                         tagBuilder: tagBuilder,
@@ -952,26 +966,26 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
                 );
             }
         } else if (stateMachine.type === 'hashtag') {
-            if (isValidHashtag(matchedText)) {
+            if (isValidHashtagWithCache(matchedText)) {
                 matches.push(
                     new HashtagMatch({
                         tagBuilder,
                         matchedText: matchedText,
                         offset: startIdx,
                         serviceName: hashtagServiceName,
-                        hashtag: matchedText.slice(1),
+                        hashtag: matchedText.substring(1),
                     })
                 );
             }
         } else if (stateMachine.type === 'mention') {
-            if (isValidMention(matchedText, mentionServiceName)) {
+            if (isValidMentionWithCache(matchedText, mentionServiceName)) {
                 matches.push(
                     new MentionMatch({
                         tagBuilder: tagBuilder,
                         matchedText: matchedText,
                         offset: startIdx,
                         serviceName: mentionServiceName,
-                        mention: matchedText.slice(1), // strip off the '@' character at the beginning
+                        mention: matchedText.substring(1), // strip off the '@' character at the beginning
                     })
                 );
             }
@@ -980,7 +994,7 @@ export function parseMatches(text: string, args: ParseMatchesArgs): Match[] {
             // chars by the state machine
             matchedText = matchedText.replace(/ +$/g, '');
 
-            if (isValidPhoneNumber(matchedText)) {
+            if (isValidPhoneNumberWithCache(matchedText)) {
                 const cleanNumber = matchedText.replace(/[^0-9,;#]/g, ''); // strip out non-digit characters exclude comma semicolon and #
 
                 matches.push(
@@ -1084,7 +1098,7 @@ export function excludeUnbalancedTrailingBracesAndPunctuation(matchedText: strin
         }
     }
 
-    return matchedText.slice(0, endIdx + 1);
+    return matchedText.substring(0, endIdx + 1);
 }
 
 // States for the parser

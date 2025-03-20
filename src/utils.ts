@@ -103,3 +103,19 @@ export function removeWithPredicate<T>(arr: T[], fn: (item: T) => boolean) {
 export function assertNever(theValue: never) {
     throw new Error(`Unhandled case for value: '${theValue}'`);
 }
+
+/**
+ * Optimized version of remove for StateMachine array used in the parser.
+ * This assumes we're only removing a single item and can stop once found.
+ *
+ * @param arr The array to remove elements from. This array is mutated.
+ * @param item The element to remove.
+ */
+export function removeStateMachine<T>(arr: T[], item: T) {
+    for (let i = arr.length - 1; i >= 0; i--) {
+        if (arr[i] === item) {
+            arr.splice(i, 1);
+            return; // Exit early once the item is found and removed
+        }
+    }
+}

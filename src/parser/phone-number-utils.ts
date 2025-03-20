@@ -60,3 +60,14 @@ export function isValidPhoneNumber(phoneNumberText: string): boolean {
 
     return hasDelimiters && validPhoneNumberRe.test(phoneNumberText);
 }
+
+// Cache for validation results
+const validPhoneNumberCache = new Map<string, boolean>();
+
+// Wrapped version with caching
+export function isValidPhoneNumberWithCache(phoneNumberText: string): boolean {
+    if (!validPhoneNumberCache.has(phoneNumberText)) {
+        validPhoneNumberCache.set(phoneNumberText, isValidPhoneNumber(phoneNumberText));
+    }
+    return validPhoneNumberCache.get(phoneNumberText)!;
+}

@@ -16,5 +16,16 @@ export function isValidHashtag(hashtag: string): boolean {
     return hashtag.length <= 140;
 }
 
+// Cache for validation results
+const validHashtagCache = new Map<string, boolean>();
+
+// Wrapped version with caching
+export function isValidHashtagWithCache(hashtag: string): boolean {
+    if (!validHashtagCache.has(hashtag)) {
+        validHashtagCache.set(hashtag, isValidHashtag(hashtag));
+    }
+    return validHashtagCache.get(hashtag)!;
+}
+
 export type HashtagService = 'twitter' | 'facebook' | 'instagram' | 'tiktok';
 export const hashtagServices: HashtagService[] = ['twitter', 'facebook', 'instagram', 'tiktok'];

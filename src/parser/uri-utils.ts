@@ -243,3 +243,32 @@ export function isValidIpV4Address(url: string): boolean {
 
     return ipV4Re.test(ipV4Part);
 }
+
+// Cache for validation results to avoid redundant regex tests
+const validSchemeUrlCache = new Map<string, boolean>();
+const validTldMatchCache = new Map<string, boolean>();
+const validIpV4AddressCache = new Map<string, boolean>();
+
+// Wrapped version with caching
+export function isValidSchemeUrlWithCache(url: string): boolean {
+    if (!validSchemeUrlCache.has(url)) {
+        validSchemeUrlCache.set(url, isValidSchemeUrl(url));
+    }
+    return validSchemeUrlCache.get(url)!;
+}
+
+// Wrapped version with caching
+export function isValidTldMatchWithCache(url: string): boolean {
+    if (!validTldMatchCache.has(url)) {
+        validTldMatchCache.set(url, isValidTldMatch(url));
+    }
+    return validTldMatchCache.get(url)!;
+}
+
+// Wrapped version with caching
+export function isValidIpV4AddressWithCache(url: string): boolean {
+    if (!validIpV4AddressCache.has(url)) {
+        validIpV4AddressCache.set(url, isValidIpV4Address(url));
+    }
+    return validIpV4AddressCache.get(url)!;
+}

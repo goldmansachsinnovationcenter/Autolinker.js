@@ -47,3 +47,14 @@ export function isValidEmail(emailAddress: string): boolean {
 
     return isKnownTld(emailAddressTld);
 }
+
+// Cache for validation results
+const validEmailCache = new Map<string, boolean>();
+
+// Wrapped version with caching
+export function isValidEmailWithCache(emailAddress: string): boolean {
+    if (!validEmailCache.has(emailAddress)) {
+        validEmailCache.set(emailAddress, isValidEmail(emailAddress));
+    }
+    return validEmailCache.get(emailAddress)!;
+}

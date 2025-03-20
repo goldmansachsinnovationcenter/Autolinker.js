@@ -29,5 +29,17 @@ export function isValidMention(mention: string, serviceName: MentionService): bo
     return re.test(mention);
 }
 
+// Cache for validation results
+const validMentionCache = new Map<string, boolean>();
+
+// Wrapped version with caching
+export function isValidMentionWithCache(mention: string, serviceName: MentionService): boolean {
+    const cacheKey = `${mention}:${serviceName}`;
+    if (!validMentionCache.has(cacheKey)) {
+        validMentionCache.set(cacheKey, isValidMention(mention, serviceName));
+    }
+    return validMentionCache.get(cacheKey)!;
+}
+
 export type MentionService = 'twitter' | 'instagram' | 'soundcloud' | 'tiktok';
 export const mentionServices: MentionService[] = ['twitter', 'instagram', 'soundcloud', 'tiktok'];
