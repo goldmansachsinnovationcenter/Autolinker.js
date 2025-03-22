@@ -1,7 +1,8 @@
 import axios from 'axios';
 import dedent from 'dedent';
 import fse from 'fs-extra';
-import punycode from 'punycode';
+// Using direct import of toUnicode function to avoid deprecated module warning
+import { toUnicode } from 'punycode';
 
 if (require.main === module) {
     // If called directly from the command line
@@ -47,7 +48,7 @@ function notCommentLine(line: string): boolean {
 function dePunycodeDomain(domain: string): string[] {
     domain = domain.toLowerCase();
     if (/xn--/.test(domain)) {
-        return [domain, punycode.toUnicode(domain)];
+        return [domain, toUnicode(domain)];
     }
     return [domain];
 }
