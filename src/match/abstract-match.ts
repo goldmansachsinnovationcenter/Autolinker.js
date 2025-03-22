@@ -87,10 +87,11 @@ export abstract class AbstractMatch {
      *
      * @deprecated Use {@link #type} instead which can assist in type-narrowing
      *   for TypeScript.
-     * @abstract
      * @return {String}
      */
-    public abstract getType(): MatchType;
+    public getType(): MatchType {
+        return this.type;
+    }
 
     /**
      * Returns the original text that was matched.

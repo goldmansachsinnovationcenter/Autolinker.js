@@ -58,7 +58,7 @@ import { HashtagService, hashtagServices } from './parser/hashtag-utils';
  *             console.log( "href = ", match.getAnchorHref() );
  *             console.log( "text = ", match.getAnchorText() );
  *
- *             switch( match.getType() ) {
+ *             switch( match.type ) {
  *                 case 'url' :
  *                     console.log( "url: ", match.getUrl() );
  *
@@ -672,19 +672,19 @@ export default class Autolinker {
     private removeUnwantedMatches(matches: Match[]) {
         if (!this.hashtag)
             removeWithPredicate(matches, (match: Match) => {
-                return match.getType() === 'hashtag';
+                return match.type === 'hashtag';
             });
         if (!this.email)
             removeWithPredicate(matches, (match: Match) => {
-                return match.getType() === 'email';
+                return match.type === 'email';
             });
         if (!this.phone)
             removeWithPredicate(matches, (match: Match) => {
-                return match.getType() === 'phone';
+                return match.type === 'phone';
             });
         if (!this.mention)
             removeWithPredicate(matches, (match: Match) => {
-                return match.getType() === 'mention';
+                return match.type === 'mention';
             });
         if (!this.urls.schemeMatches) {
             removeWithPredicate(
